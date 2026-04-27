@@ -2,7 +2,7 @@ const path = require("node:path");
 const express = require("express");
 const cors = require("cors");
 
-const { createDb } = require("./db");
+const { createStore } = require("./store");
 const { parseAmountToPaise, formatPaiseToAmount } = require("./money");
 
 function isValidDateString(value) {
@@ -43,27 +43,23 @@ function toExpenseResponse(row) {
 function createApp(options = {}) {
   const app = express();
 
-  const dbFilePath = options.dbFilePath || path.join(__dirname, "..", "data", "expenses.db");
+  const databaseUrl = options.databaseUrl || process.env.DATABASE_URL;
+  const defaultSqlitePath =
+    process.env.VERCEL && !databaseUrl
+      ? path.join("/tmp", "expenses.db")
+      : path.join(__dirname, "..", "data", "expenses.db");
+  const dbFilePath = options.dbFilePath || defaultSqlitePath;
   const migrationsDir = options.migrationsDir || path.join(__dirname, "..", "migrations");
   const frontendDir = options.frontendDir || path.join(__dirname, "..", "..", "frontend");
 
-  const db = createDb({ dbFilePath, migrationsDir });
+  const store = createStore({ dbFilePath, migrationsDir, databaseUrl });
 
-  app.locals.db = db;
+  app.locals.store = store;
 
   app.use(cors());
   app.use(express.json());
 
-  const insertExpenseStmt = db.prepare(`
-    INSERT INTO expenses (request_id, amount_paise, category, description, date)
-    VALUES (@request_id, @amount_paise, @category, @description, @date)
-    ON CONFLICT(request_id) DO NOTHING
-  `);
-
-  const getExpenseByIdStmt = db.prepare("SELECT * FROM expenses WHERE id = ?");
-  const getExpenseByRequestIdStmt = db.prepare("SELECT * FROM expenses WHERE request_id = ?");
-
-  app.post("/expenses", (req, res) => {
+  app.post("/expenses", async (req, res) => {
     const { amount, category, description, date, request_id, idempotency_key } = req.body || {};
     const idempotencyKey = request_id || idempotency_key || req.get("Idempotency-Key");
 
@@ -99,21 +95,19 @@ function createApp(options = {}) {
     };
 
     try {
-      const result = insertExpenseStmt.run(payload);
+      const result = await store.createExpense(payload);
 
-      if (result.changes === 1) {
-        const created = getExpenseByIdStmt.get(result.lastInsertRowid);
+      if (result.created && result.row) {
         return res.status(201).json({
-          ...toExpenseResponse(created),
+          ...toExpenseResponse(result.row),
           created: true,
           replayed: false
         });
       }
 
-      const existing = getExpenseByRequestIdStmt.get(payload.request_id);
-      if (existing) {
+      if (result.row) {
         return res.status(200).json({
-          ...toExpenseResponse(existing),
+          ...toExpenseResponse(result.row),
           created: false,
           replayed: true
         });
@@ -125,23 +119,12 @@ function createApp(options = {}) {
     }
   });
 
-  app.get("/expenses", (req, res) => {
+  app.get("/expenses", async (req, res) => {
     try {
-      const params = [];
-      let sql = "SELECT * FROM expenses";
-
-      if (req.query.category) {
-        sql += " WHERE category = ? COLLATE NOCASE";
-        params.push(String(req.query.category));
-      }
-
-      if (req.query.sort === "date_desc") {
-        sql += " ORDER BY date DESC, created_at DESC, id DESC";
-      } else {
-        sql += " ORDER BY date ASC, id ASC";
-      }
-
-      const rows = db.prepare(sql).all(...params);
+      const rows = await store.listExpenses({
+        category: req.query.category ? String(req.query.category) : "",
+        sort: req.query.sort ? String(req.query.sort) : ""
+      });
       const expenses = rows.map(toExpenseResponse);
 
       return res.status(200).json({ expenses });

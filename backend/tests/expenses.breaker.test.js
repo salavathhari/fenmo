@@ -9,16 +9,16 @@ const { createApp } = require("../src/app");
 
 function createMemoryContext(t) {
   const app = createApp({ dbFilePath: ":memory:" });
-  const db = app.locals.db;
+  const store = app.locals.store;
 
   t.after(() => {
-    db.close();
+    return store.close();
   });
 
   return {
     app,
     api: request(app),
-    db
+    store
   };
 }
 
@@ -26,17 +26,17 @@ function createFileDbContext(t) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "expense-breaker-"));
   const dbFilePath = path.join(tempDir, "test.db");
   const app = createApp({ dbFilePath });
-  const db = app.locals.db;
+  const store = app.locals.store;
 
-  t.after(() => {
-    db.close();
+  t.after(async () => {
+    await store.close();
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
   return {
     app,
     api: request(app),
-    db
+    store
   };
 }
 
@@ -119,7 +119,7 @@ test("should remain consistent when client retries after assumed response loss",
 });
 
 test("should resist race conditions via DB-level uniqueness under simultaneous inserts", async (t) => {
-  const { api, db } = createMemoryContext(t);
+  const { api, store } = createMemoryContext(t);
 
   const sharedKey = "race-db-1";
   const req = payload({ request_id: sharedKey, amount: "10.01", category: "Race" });
@@ -127,12 +127,12 @@ test("should resist race conditions via DB-level uniqueness under simultaneous i
   // Simultaneous insert attempts for the same key.
   await Promise.all(Array.from({ length: 30 }, () => api.post("/expenses").send(req)));
 
-  const rows = db.prepare("SELECT id, request_id FROM expenses WHERE request_id = ?").all(sharedKey);
+  const rows = await store.debugGetExpensesByRequestId(sharedKey);
   assert.equal(rows.length, 1);
 });
 
 test("should preserve money precision for edge values and exact totals", async (t) => {
-  const { api, db } = createMemoryContext(t);
+  const { api, store } = createMemoryContext(t);
 
   const values = [
     { request_id: "money-a", amount: "10.10" },
@@ -152,7 +152,7 @@ test("should preserve money precision for edge values and exact totals", async (
     );
   }
 
-  const rows = db.prepare("SELECT amount_paise FROM expenses WHERE category = 'Money'").all();
+  const rows = await store.debugGetExpensesByCategory("Money");
   const dbTotal = rows.reduce((sum, row) => sum + row.amount_paise, 0);
 
   const response = await api.get("/expenses").query({ category: "Money" });
@@ -216,12 +216,12 @@ test("should return strict newest-first order for sort=date_desc", async (t) => 
 });
 
 test("should fail cleanly when DB is unavailable and avoid inconsistent state", async (t) => {
-  const { api, db } = createFileDbContext(t);
+  const { api, store } = createFileDbContext(t);
 
   await api.post("/expenses").send(payload({ request_id: "db-ok-1", amount: "55.00", category: "Stable" }));
 
   // Simulate DB crash/unavailability.
-  db.close();
+  await store.close();
 
   const failure = await api.post("/expenses").send(
     payload({ request_id: "db-crash-1", amount: "66.00", category: "Stable" })
@@ -231,7 +231,7 @@ test("should fail cleanly when DB is unavailable and avoid inconsistent state", 
 });
 
 test("data integrity check after mixed stress load: no duplicate keys and totals consistent", async (t) => {
-  const { api, db } = createMemoryContext(t);
+  const { api, store } = createMemoryContext(t);
 
   const sharedKeys = ["integrity-dup-1", "integrity-dup-2", "integrity-dup-3"];
   const uniqueKeys = Array.from({ length: 20 }, (_, i) => `integrity-unique-${i + 1}`);
@@ -263,7 +263,7 @@ test("data integrity check after mixed stress load: no duplicate keys and totals
 
   await Promise.all([...duplicateRequests, ...uniqueRequests]);
 
-  const rows = db.prepare("SELECT request_id, amount_paise FROM expenses").all();
+  const rows = await store.debugGetAllExpenses();
   const dbKeySet = new Set(rows.map((row) => row.request_id));
   const dbTotal = rows.reduce((sum, row) => sum + row.amount_paise, 0);
 

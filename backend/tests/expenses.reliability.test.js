@@ -6,17 +6,17 @@ const { createApp } = require("../src/app");
 
 function createTestContext(t) {
   const app = createApp({ dbFilePath: ":memory:" });
-  const db = app.locals.db;
+  const store = app.locals.store;
 
   // Ensure each test closes its DB connection.
   t.after(() => {
-    db.close();
+    return store.close();
   });
 
   return {
     app,
     api: request(app),
-    db
+    store
   };
 }
 
@@ -111,7 +111,7 @@ test("retry behavior: resubmitting after success keeps data consistent", async (
 });
 
 test("money handling: paise storage is exact for decimal values", async (t) => {
-  const { api, db } = createTestContext(t);
+  const { api, store } = createTestContext(t);
 
   const values = [
     { request_id: "money-1", amount: "10.10", expectedPaise: 1010 },
@@ -129,9 +129,7 @@ test("money handling: paise storage is exact for decimal values", async (t) => {
     });
   }
 
-  const rows = db
-    .prepare("SELECT request_id, amount_paise FROM expenses WHERE category = 'Money' ORDER BY request_id ASC")
-    .all();
+  const rows = await store.debugGetExpensesByCategory("Money");
 
   assert.equal(rows.length, 3);
   assert.deepEqual(
@@ -283,7 +281,7 @@ test("error handling: malformed JSON gives 400 and DB failure gives 500", async 
   assert.equal(malformedJson.status, 400);
 
   // Force DB failure and verify route returns a server error.
-  app.locals.db.close();
+  await app.locals.store.close();
 
   const dbFailure = await api.get("/expenses");
   assert.equal(dbFailure.status, 500);

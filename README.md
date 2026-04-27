@@ -5,6 +5,7 @@ Minimal full-stack expense tracker with production-style correctness under retri
 ## Stack
 
 - Backend: Express + SQLite
+- Production DB for Vercel: Postgres via `DATABASE_URL` (for example Neon through the Vercel Marketplace)
 - Frontend: Plain HTML/CSS/JavaScript
 - Tests: Node test runner + Supertest
 
@@ -34,6 +35,8 @@ npm start
 - http://localhost:4000/expenses for API
 
 SQLite DB file is created at backend/data/expenses.db.
+
+For Vercel deployment, set `DATABASE_URL` so the app uses Postgres instead of local SQLite.
 
 ## Run Tests
 
@@ -114,6 +117,7 @@ GET /expenses?category=Food&sort=date_desc
 - Partial failure: if request likely succeeded but client missed response, resubmitting same request_id returns same server record
 - Slow/failed API: UI shows loading and error states, plus Retry Last Submit button
 - DB enforces uniqueness so correctness does not depend only on frontend behavior
+- On Vercel, use Postgres via `DATABASE_URL` because SQLite file persistence is not reliable in serverless environments
 
 ## Money Handling
 
@@ -136,6 +140,7 @@ flowchart LR
 ## Key Decisions
 
 - Chose SQLite for simple, durable local persistence without operational overhead
+- Added a Postgres code path for Vercel/serverless deployment while keeping SQLite for simple local development
 - Enforced idempotency in database schema and backend logic, not only in UI
 - Kept frontend intentionally simple and correctness-focused
 
@@ -145,3 +150,13 @@ flowchart LR
 - No pagination or search (small assignment scope)
 - No complex UI framework; prioritized reliability and clarity
 - Live deployment link is not included in this repository and must be added at submission time after deployment
+
+## Vercel Deployment
+
+This repository includes a root `api/index.js`, `vercel.json`, and root `package.json` so the full app can run on Vercel as a Node function.
+
+Before deploying to production on Vercel:
+
+1. Provision a Postgres database, such as Neon from the Vercel Marketplace.
+2. Add the resulting connection string as `DATABASE_URL` in your Vercel project.
+3. Deploy with `vercel` for preview or `vercel --prod` for production.
