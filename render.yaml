@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: fenmo-backend
+    runtime: node
+    plan: starter
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: FRONTEND_ORIGIN
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: SQLITE_DB_PATH
+        value: /var/data/expenses.db
+    disk:
+      name: fenmo-data
+      mountPath: /var/data
+      sizeGB: 1

@@ -4,6 +4,7 @@
   "description": "Expense tracker backend",
   "main": "src/server.js",
   "scripts": {
+    "build": "node -e \"console.log('No build step required')\"",
     "start": "node src/server.js",
     "dev": "node src/server.js",
     "test": "node --test",

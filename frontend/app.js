@@ -1,4 +1,6 @@
-const API_BASE = "";
+const RAW_API_BASE = "__API_BASE_URL__";
+const API_BASE = RAW_API_BASE === "__API_BASE_URL__" ? "" : RAW_API_BASE.replace(/\/+$/, "");
+const CURRENCY_SYMBOL = "\u20B9";
 const PENDING_REQUEST_ID_KEY = "expense_form_pending_request_id";
 
 const form = document.getElementById("expense-form");
@@ -58,6 +60,21 @@ function formatPaiseToAmount(paise) {
   return `${rupees}.${remainder}`;
 }
 
+function formatCurrency(amount) {
+  return `${CURRENCY_SYMBOL}${amount}`;
+}
+
+async function readApiResponse(response) {
+  const contentType = response.headers.get("content-type") || "";
+
+  if (contentType.includes("application/json")) {
+    return response.json();
+  }
+
+  const text = await response.text();
+  return text ? { error: text } : {};
+}
+
 function renderCategorySummary(expenses) {
   categorySummaryEl.innerHTML = "";
 
@@ -77,7 +94,7 @@ function renderCategorySummary(expenses) {
 
   for (const [category, totalPaise] of totalsByCategory.entries()) {
     const item = document.createElement("li");
-    item.textContent = `${category}: ₹${formatPaiseToAmount(totalPaise)}`;
+    item.textContent = `${category}: ${formatCurrency(formatPaiseToAmount(totalPaise))}`;
     categorySummaryEl.appendChild(item);
   }
 }
@@ -92,7 +109,7 @@ function renderExpenses(expenses) {
     cell.textContent = "No expenses found";
     row.appendChild(cell);
     expensesBody.appendChild(row);
-    totalEl.textContent = "Total: ₹0.00";
+    totalEl.textContent = `Total: ${formatCurrency("0.00")}`;
     renderCategorySummary([]);
     return;
   }
@@ -107,12 +124,12 @@ function renderExpenses(expenses) {
       <td>${expense.date}</td>
       <td>${expense.category}</td>
       <td>${expense.description}</td>
-      <td>₹${expense.amount}</td>
+      <td>${formatCurrency(expense.amount)}</td>
     `;
     expensesBody.appendChild(row);
   }
 
-  totalEl.textContent = `Total: ₹${formatPaiseToAmount(totalPaise)}`;
+  totalEl.textContent = `Total: ${formatCurrency(formatPaiseToAmount(totalPaise))}`;
   renderCategorySummary(expenses);
 }
 
@@ -136,7 +153,7 @@ async function fetchExpenses() {
 
   try {
     const response = await fetch(url);
-    const data = await response.json();
+    const data = await readApiResponse(response);
 
     if (!response.ok) {
       throw new Error(data.error || "Failed to fetch expenses");
@@ -175,7 +192,7 @@ async function submitExpense(event) {
       body: JSON.stringify(payload)
     });
 
-    const data = await response.json();
+    const data = await readApiResponse(response);
 
     if (!response.ok) {
       throw new Error(data.error || "Failed to add expense");
@@ -215,7 +232,7 @@ async function retryLastSubmit() {
       body: JSON.stringify(lastFailedPayload)
     });
 
-    const data = await response.json();
+    const data = await readApiResponse(response);
 
     if (!response.ok) {
       throw new Error(data.error || "Retry failed");

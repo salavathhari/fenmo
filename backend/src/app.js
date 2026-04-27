@@ -5,6 +5,39 @@ const cors = require("cors");
 const { createStore } = require("./store");
 const { parseAmountToPaise, formatPaiseToAmount } = require("./money");
 
+function normalizeOriginList(value) {
+  if (!value) {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter(Boolean);
+  }
+
+  return String(value)
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function createCorsOptions(options = {}) {
+  const allowedOrigins = normalizeOriginList(
+    options.allowedOrigins || process.env.CORS_ALLOWED_ORIGINS || process.env.FRONTEND_ORIGIN
+  );
+
+  return {
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error("origin not allowed by CORS"));
+    },
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Idempotency-Key"]
+  };
+}
+
 function isValidDateString(value) {
   if (!value || typeof value !== "string") {
     return false;
@@ -44,19 +77,25 @@ function createApp(options = {}) {
   const app = express();
 
   const databaseUrl = options.databaseUrl || process.env.DATABASE_URL;
-  const defaultSqlitePath =
-    process.env.VERCEL && !databaseUrl
-      ? path.join("/tmp", "expenses.db")
-      : path.join(__dirname, "..", "data", "expenses.db");
-  const dbFilePath = options.dbFilePath || defaultSqlitePath;
+  const configuredSqlitePath = options.dbFilePath || process.env.SQLITE_DB_PATH;
+  const dbFilePath =
+    databaseUrl
+      ? path.join(__dirname, "..", "data", "expenses.db")
+      : configuredSqlitePath ||
+        (process.env.RENDER
+          ? path.join("/var", "data", "expenses.db")
+          : process.env.VERCEL
+            ? path.join("/tmp", "expenses.db")
+            : path.join(__dirname, "..", "data", "expenses.db"));
   const migrationsDir = options.migrationsDir || path.join(__dirname, "..", "migrations");
   const frontendDir = options.frontendDir || path.join(__dirname, "..", "..", "frontend");
 
   const store = createStore({ dbFilePath, migrationsDir, databaseUrl });
+  const corsOptions = createCorsOptions(options);
 
   app.locals.store = store;
 
-  app.use(cors());
+  app.use(cors(corsOptions));
   app.use(express.json());
 
   app.post("/expenses", async (req, res) => {

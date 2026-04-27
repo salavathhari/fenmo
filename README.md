@@ -4,9 +4,9 @@ Minimal full-stack expense tracker with production-style correctness under retri
 
 ## Stack
 
-- Backend: Express + SQLite
-- Production DB for Vercel: Postgres via `DATABASE_URL` (for example Neon through the Vercel Marketplace)
+- Backend: Node.js + Express
 - Frontend: Plain HTML/CSS/JavaScript
+- Database: SQLite locally, optional Postgres in serverless environments via `DATABASE_URL`
 - Tests: Node test runner + Supertest
 
 ## Project Structure
@@ -35,8 +35,6 @@ npm start
 - http://localhost:4000/expenses for API
 
 SQLite DB file is created at backend/data/expenses.db.
-
-For Vercel deployment, set `DATABASE_URL` so the app uses Postgres instead of local SQLite.
 
 ## Run Tests
 
@@ -117,7 +115,6 @@ GET /expenses?category=Food&sort=date_desc
 - Partial failure: if request likely succeeded but client missed response, resubmitting same request_id returns same server record
 - Slow/failed API: UI shows loading and error states, plus Retry Last Submit button
 - DB enforces uniqueness so correctness does not depend only on frontend behavior
-- On Vercel, use Postgres via `DATABASE_URL` because SQLite file persistence is not reliable in serverless environments
 
 ## Money Handling
 
@@ -139,24 +136,76 @@ flowchart LR
 
 ## Key Decisions
 
-- Chose SQLite for simple, durable local persistence without operational overhead
-- Added a Postgres code path for Vercel/serverless deployment while keeping SQLite for simple local development
-- Enforced idempotency in database schema and backend logic, not only in UI
-- Kept frontend intentionally simple and correctness-focused
+- Chose Express plus plain JavaScript to keep the feature set small and maintainable
+- Stored money as integer paise to avoid floating point errors
+- Enforced idempotency in the persistence layer so retries and duplicate clicks stay safe
+- Kept SQLite for easy local development and added configurable deployment paths for platforms with different storage models
 
 ## Trade-offs / Intentionally Left Out
 
 - No authentication or multi-user model
 - No pagination or search (small assignment scope)
 - No complex UI framework; prioritized reliability and clarity
-- Live deployment link is not included in this repository and must be added at submission time after deployment
+- SQLite on Render requires a persistent disk and a single running instance
 
-## Vercel Deployment
+## Deployment
 
-This repository includes a root `api/index.js`, `vercel.json`, and root `package.json` so the full app can run on Vercel as a Node function.
+### Live URLs
 
-Before deploying to production on Vercel:
+- Frontend: https://frontend-seven-mu-65.vercel.app
+- Backend/API: https://fenmo-henna.vercel.app
 
-1. Provision a Postgres database, such as Neon from the Vercel Marketplace.
-2. Add the resulting connection string as `DATABASE_URL` in your Vercel project.
-3. Deploy with `vercel` for preview or `vercel --prod` for production.
+### Backend on Render
+
+This repo includes [render.yaml](/C:/Users/salav/OneDrive/Desktop/fenmo/fenmo/render.yaml) for a Node web service using the `backend` directory as the service root.
+
+The currently live backend URL above is deployed on Vercel from this environment. The `render.yaml` and backend environment support were added so you can move the API to Render cleanly for a submission flow that prefers Render.
+
+Exact Render settings:
+
+- Service type: `Web Service`
+- Runtime: `Node`
+- Root directory: `backend`
+- Build command: `npm install`
+- Start command: `npm start`
+- Health check path: `/health`
+- Environment variables:
+  `FRONTEND_ORIGIN`: your deployed frontend origin, such as `https://your-frontend.vercel.app`
+  `CORS_ALLOWED_ORIGINS`: comma-separated list if you want more than one allowed frontend
+  `DATABASE_URL`: optional Postgres connection string if you choose managed Postgres instead of SQLite
+  `SQLITE_DB_PATH`: `/var/data/expenses.db` when using Render persistent disk with SQLite
+
+SQLite persistence on Render:
+
+- Render’s filesystem is ephemeral unless you attach a persistent disk.
+- The included `render.yaml` mounts a disk at `/var/data` and points SQLite to `/var/data/expenses.db`.
+- Persistent disks are single-instance storage, so horizontal scaling is not a good fit for this SQLite setup.
+
+### Frontend on Vercel
+
+This repo includes [frontend/package.json](/C:/Users/salav/OneDrive/Desktop/fenmo/fenmo/frontend/package.json) and [frontend/vercel.json](/C:/Users/salav/OneDrive/Desktop/fenmo/fenmo/frontend/vercel.json) for a standalone static deployment.
+
+Exact Vercel settings:
+
+- Root directory: `frontend`
+- Framework preset: `Other`
+- Install command: `npm install`
+- Build command: `npm run build`
+- Output directory: `dist`
+- Environment variable:
+  `FRONTEND_API_BASE_URL`: your deployed backend base URL, such as `https://your-backend.onrender.com`
+
+### Environment files
+
+- Backend example: [backend/.env.example](/C:/Users/salav/OneDrive/Desktop/fenmo/fenmo/backend/.env.example)
+- Frontend example: [frontend/.env.example](/C:/Users/salav/OneDrive/Desktop/fenmo/fenmo/frontend/.env.example)
+
+### Verification Checklist
+
+- Can add an expense from the deployed frontend
+- Refreshing the page keeps the app usable and the list reloads
+- Filtering by category works
+- Sorting by newest first works
+- Total reflects the currently visible list
+- Duplicate submissions with the same request id do not create multiple rows
+- Frontend shows an error message when the API is unavailable
